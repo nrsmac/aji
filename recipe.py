@@ -1,4 +1,7 @@
+#!/usr/bin/env python
 import requests
+import markdown
+from pprint import pprint
 from bs4 import BeautifulSoup
 
 class Recipe:
@@ -16,13 +19,53 @@ class Recipe:
         self._scrape_from_url()
 
     def _get_ingredients(self, soup):
-        #TODO check if it has multiple sub-ingredients. This works, but doesn't if there are NO subingredients in teh case of: https://cooking.nytimes.com/recipes/1022732-ultimate-pumpkin-pie?module=Recipe+of+The+Day&pgType=homepage&action=click
-        ingredients_section = soup.select('div[class*="ingredients"]')
+        '''
+        Returns [] or {} if has multiple sub-ingredients grouped on parts of a dish. 
+        '''
         ingredients_group_names = [s.get_text() for s in soup.select('h3[class*="ingredientgroup_name"]')]
-        ingredients_groups = [g for g in soup.select('ul[class*="ingredientgroup_subIngredients"]')]
-        ingredients_groups = zip(ingredients_group_names, [i for i in ingredients_groups])
+        if ingredients_group_names:
+            ingredients_groups = [g for g in soup.select('ul[class*="ingredientgroup_subIngredients"]')]
+            ingredients_groups = zip(ingredients_group_names, [i for i in ingredients_groups])
 
-        return {name:[i.get_text() for i in ig] for name, ig in ingredients_groups}
+            return {name:[i.get_text() for i in ig] for name, ig in ingredients_groups}
+        else:
+            ingredients_li = [i for i in soup.select('div[class*="ingredients"] ul li')]
+            return [i.get_text() for i in ingredients_li] 
+        
+    def _get_steps(self, soup):
+        steps_text = [s.get_text() for s in soup.select('ol[class*="preparation"] li p')]
+        return list(zip(range(1, len(steps_text)+1), steps_text)) 
+            
+    def get_markdown(self):
+        # TODO: html output with markdown library
+
+        # Get ingredients string
+        if type(self.ingredients) is list:
+            ingredients = "* "+"* ".join([f'{i}\n' for i in self.ingredients])
+        else:  # Dictionary with sub-ingredients 
+            ingredients = ""
+            for k, v in self.ingredients.items():
+                ingredients += f"{k}:\n* "
+                assert type(v) is list
+                ingredients += "* ".join([f'{i}\n' for i in v])
+                # ingredients += '\n' 
+           
+        # Get steps string 
+        steps = "".join([f'{i}. {s}\n' for i,s in self.steps]) 
+
+        # Populate final string
+        recipe = \
+            f"""# {self.title}
+BY: {self.author}
+PREP TIME: {self.prep_time}
+{self.servings}
+## Ingredients:
+{ingredients}
+## Directions:
+{steps}
+"""
+        return recipe
+
 
     def _scrape_from_url(self):
         page = requests.get(self.url)
@@ -34,14 +77,35 @@ class Recipe:
         self.servings = soup.select_one('div[class*="recipeYield"]').get_text()
         self.prep_time = soup.select_one('dl[class*="stats"]').select_one('dd').get_text()
         self.ingredients = self._get_ingredients(soup)
+        self.steps = self._get_steps(soup)
 
+    def export(self, outdir, format='md'): 
+        with open(f'{outdir}/{self.title}.{format}', 'w') as f:
+            if format=='md':
+                f.write(self.get_markdown())
+            elif format=='html':
+                f.write(markdown.markdown(self.get_markdown()))
 
     def __repr__(self):
-        return f"{self.title}\n{self.servings}\n{self.description}\n{self.prep_time}\n{self.ingredients}\n{self.url}"
+        #TODO make prettier
+        return f"{self.title}"
 
     def __str__(self):
-        return f"{self.title}\n{self.servings}\n{self.description}\n{self.prep_time}\n{self.ingredients}\n{self.url}"
+        #TODO make prettier
+        return f"{self.title}"
 
 if __name__ == "__main__":
-    recipe = Recipe("https://cooking.nytimes.com/recipes/1022732-ultimate-pumpkin-pie?module=Recipe+of+The+Day&pgType=homepage&action=click")
-    print(recipe)
+    # recipe = Recipe("https://cooking.nytimes.com/recipes/1022732-ultimate-pumpkin-pie?module=Recipe+of+The+Day&pgType=homepage&action=click")
+    # recipe = Recipe.from_url("https://cooking.nytimes.com/recipes/1020929-vegan-lasagna")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("url", help="url of NYT Cookint Recipe")
+    parser.add_argument("-o", "--output", default='./', help="output directory of HTML")
+    parser.add_argument("--format", default="md", help="md or html")
+    args = parser.parse_args()
+
+    recipe = Recipe(args.url)
+
+        
+     
+    recipe.export(f'./{args.output}', format=args.format)
